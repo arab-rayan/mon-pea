@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Suivi DCAM – MSCI World PEA</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #1d2330; --muted: #677085; --border: #e3e6ec;
+    --accent: #2f6fde; --up: #128a4a; --down: #c8352f; --grid: rgba(0,0,0,.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #11141a; --card: #1a1f28; --text: #e8ebf1; --muted: #98a1b3; --border: #2a3140;
+            --accent: #6aa0ff; --up: #3ccb7f; --down: #ff6b63; --grid: rgba(255,255,255,.07); }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         background: var(--bg); color: var(--text); line-height: 1.45; }
+  main { max-width: 1040px; margin: 0 auto; padding: 20px 16px 48px; }
+  header h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  header p { margin: 0; color: var(--muted); font-size: .9rem; }
+  .warn { margin-top: 10px; font-size: .82rem; color: var(--muted); border-left: 3px solid var(--accent); padding-left: 10px; }
+  section { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 18px; margin-top: 18px; }
+  section h2 { font-size: 1.1rem; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: .85rem; margin: 0 0 14px; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .kpi { background: var(--bg); border-radius: 10px; padding: 12px; }
+  .kpi .l { font-size: .78rem; color: var(--muted); }
+  .kpi .v { font-size: 1.35rem; font-weight: 650; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .up { color: var(--up); } .down { color: var(--down); }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+  select, input { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border);
+                  border-radius: 8px; padding: 7px 10px; }
+  input { width: 130px; }
+  select { max-width: 100%; }
+  label { font-size: .85rem; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
+  .btns button { font: inherit; font-size: .85rem; border: 1px solid var(--border); background: var(--bg);
+                 color: var(--text); border-radius: 8px; padding: 6px 11px; cursor: pointer; }
+  .btns button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .chart { position: relative; height: 320px; }
+  .chart.small { height: 240px; }
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; font-size: .8rem; }
+  td.n, th.n { text-align: right; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 760px) { .grid2 { grid-template-columns: 1fr; } .chart { height: 260px; } }
+  .scroll { overflow-x: auto; }
+  footer { color: var(--muted); font-size: .8rem; margin-top: 24px; }
+  #error { display: none; background: var(--card); border: 1px solid var(--down); border-radius: 12px; padding: 16px; margin-top: 18px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Suivi DCAM – MSCI World (PEA)</h1>
+    <p id="updated">Chargement des données…</p>
+    <p class="warn">Outil d'information, pas un conseil en investissement. Les performances passées ne préjugent pas des performances futures.</p>
+  </header>
+
+  <div id="error"></div>
+
+  <section>
+    <h2>DCAM aujourd'hui</h2>
+    <p class="sub" id="lastDate"></p>
+    <div class="kpis" id="kpis"></div>
+  </section>
+
+  <section>
+    <h2>Mon investissement</h2>
+    <p class="sub">Saisis ton prix d'achat et ta quantité. Ils sont gardés dans ce navigateur uniquement.</p>
+    <div class="row">
+      <label>Prix d'achat (€ / part)<input id="buyPrice" type="number" step="0.001" min="0" value="6.18"></label>
+      <label>Nombre de parts<input id="qty" type="number" step="1" min="0" value="5"></label>
+    </div>
+    <div class="kpis" id="myKpis"></div>
+  </section>
+
+  <section>
+    <h2>Courbe</h2>
+    <div class="row">
+      <select id="tickerSel"></select>
+      <div class="btns" id="periods"></div>
+    </div>
+    <div class="chart"><canvas id="mainChart"></canvas></div>
+  </section>
+
+  <section>
+    <h2>DCAM, WPEA et CW8 comparés (base 100)</h2>
+    <p class="sub">Les trois suivent le MSCI World. Base 100 au lancement de DCAM : les écarts viennent des frais et du suivi de l'indice.</p>
+    <div class="chart small"><canvas id="cmpChart"></canvas></div>
+  </section>
+
+  <section>
+    <h2>Performance du MSCI World année par année</h2>
+    <p class="sub">Calculée sur l'ETF CW8 (même indice, historique depuis 2009, en euros, après ses frais). DCAM est trop récent pour un historique long.</p>
+    <div class="grid2">
+      <div class="chart small"><canvas id="yearChart"></canvas></div>
+      <div class="scroll"><table id="yearTable"></table></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Les grosses baisses passées (−10 % ou plus)</h2>
+    <p class="sub">Écart par rapport au plus haut précédent, toujours sur CW8. Montre combien de temps il a fallu pour remonter.</p>
+    <div class="chart small"><canvas id="ddChart"></canvas></div>
+    <div class="scroll" style="margin-top:14px"><table id="ddTable"></table></div>
+  </section>
+
+  <section>
+    <h2>Simulateur : investir chaque mois</h2>
+    <p class="sub">Achat le premier jour de bourse de chaque mois, sur l'historique de CW8. Sans frais de courtage, parts fractionnées : c'est une simulation.</p>
+    <div class="row">
+      <label>Montant par mois (€)<input id="dcaAmount" type="number" min="1" step="10" value="100"></label>
+      <label>Début<input id="dcaStart" type="month" value="2015-01"></label>
+    </div>
+    <div class="kpis" id="dcaKpis"></div>
+    <div class="chart small" style="margin-top:14px"><canvas id="dcaChart"></canvas></div>
+  </section>
+
+  <footer>
+    <p id="sourceLine"></p>
+    <p>Données mises à jour automatiquement chaque soir de semaine par GitHub Actions. Les cours peuvent avoir un léger décalage avec ton courtier.</p>
+  </footer>
+</main>
+
+<script>
+const PRIMARY = "DCAM.PA", LONG = "CW8.PA";
+const PERIODS = [["1M",1],["6M",6],["YTD","ytd"],["1A",12],["5A",60],["Max","max"]];
+let DATA, charts = {}, period = 6, ticker = PRIMARY;
+
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const eur = (v, d = 2) => v.toLocaleString("fr-FR", { style: "currency", currency: "EUR", minimumFractionDigits: d, maximumFractionDigits: d });
+const num = (v, d = 2) => v.toLocaleString("fr-FR", { minimumFractionDigits: d, maximumFractionDigits: d });
+const pct = (v, d = 1) => (v > 0 ? "+" : "") + num(v, d) + " %";
+const cls = v => (v > 0 ? "up" : v < 0 ? "down" : "");
+const frDate = s => new Date(s + "T12:00:00").toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" });
+const series = t => { const s = DATA.series[t]; return s && s.dates && s.dates.length ? s : null; };
+
+// Dernier indice dont la date est <= d (recherche dichotomique)
+function idxAtOrBefore(s, d) {
+  let lo = 0, hi = s.dates.length - 1, r = -1;
+  while (lo <= hi) { const m = (lo + hi) >> 1; if (s.dates[m] <= d) { r = m; lo = m + 1; } else hi = m - 1; }
+  return r;
+}
+function shiftMonths(dateStr, m) {
+  const d = new Date(dateStr + "T12:00:00"); d.setMonth(d.getMonth() - m); return d.toISOString().slice(0, 10);
+}
+function changeSince(s, months) {
+  const last = s.close.length - 1, i = idxAtOrBefore(s, shiftMonths(s.dates[last], months));
+  return i < 0 ? null : (s.close[last] / s.close[i] - 1) * 100;
+}
+function downsample(dates, vals, max = 700) {
+  if (dates.length <= max) return [dates, vals];
+  const step = Math.ceil(dates.length / max), D = [], V = [];
+  for (let i = 0; i < dates.length; i += step) { D.push(dates[i]); V.push(vals[i]); }
+  if (D[D.length - 1] !== dates[dates.length - 1]) { D.push(dates[dates.length - 1]); V.push(vals[vals.length - 1]); }
+  return [D, V];
+}
+function store(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+
+function baseOptions(extra = {}) {
+  const grid = css("--grid"), muted = css("--muted");
+  return Object.assign({
+    responsive: true, maintainAspectRatio: false, animation: false,
+    interaction: { mode: "index", intersect: false },
+    plugins: { legend: { labels: { color: muted, boxWidth: 12 } } },
+    scales: {
+      x: { ticks: { color: muted, maxTicksLimit: 7, maxRotation: 0 }, grid: { color: grid } },
+      y: { ticks: { color: muted }, grid: { color: grid } }
+    },
+    elements: { point: { radius: 0, hoverRadius: 3 }, line: { borderWidth: 2, tension: 0 } }
+  }, extra);
+}
+function draw(id, config) { if (charts[id]) charts[id].destroy(); charts[id] = new Chart(document.getElementById(id), config); }
+
+function kpi(label, value, c = "") { return `<div class="kpi"><div class="l">${label}</div><div class="v ${c}">${value}</div></div>`; }
+
+/* ---------- DCAM aujourd'hui ---------- */
+function renderKpis() {
+  const s = series(PRIMARY);
+  if (!s) { document.getElementById("kpis").innerHTML = "<p>DCAM indisponible pour le moment.</p>"; return; }
+  const n = s.close.length - 1, last = s.close[n];
+  document.getElementById("lastDate").textContent = "Dernier cours : " + frDate(s.dates[n]);
+  const day = n > 0 ? (last / s.close[n - 1] - 1) * 100 : null;
+  const items = [["Cours", eur(last, 3), ""]];
+  const add = (l, v) => items.push([l, v === null ? "—" : pct(v), v === null ? "" : cls(v)]);
+  add("Sur 1 jour", day); add("Sur 1 mois", changeSince(s, 1)); add("Sur 1 an", changeSince(s, 12));
+  add("Depuis le lancement", (last / s.close[0] - 1) * 100);
+  document.getElementById("kpis").innerHTML = items.map(([l, v, c]) => kpi(l, v, c)).join("");
+}
+
+/* ---------- Mon investissement ---------- */
+function renderMine() {
+  const s = series(PRIMARY), out = document.getElementById("myKpis");
+  const p = parseFloat(document.getElementById("buyPrice").value), q = parseFloat(document.getElementById("qty").value);
+  store("buyPrice", document.getElementById("buyPrice").value); store("qty", document.getElementById("qty").value);
+  if (!s || !(p > 0) || !(q > 0)) { out.innerHTML = ""; return; }
+  const last = s.close[s.close.length - 1], cost = p * q, val = last * q, diff = val - cost;
+  out.innerHTML = kpi("Investi", eur(cost)) + kpi("Valeur actuelle", eur(val)) +
+    kpi("Plus / moins-value", (diff > 0 ? "+" : "") + eur(diff), cls(diff)) + kpi("En %", pct((val / cost - 1) * 100, 2), cls(diff));
+}
+
+/* ---------- Courbe principale ---------- */
+function renderMain() {
+  const s = series(ticker); if (!s) return;
+  const lastD = s.dates[s.dates.length - 1];
+  let from = s.dates[0];
+  if (period === "ytd") from = lastD.slice(0, 4) + "-01-01";
+  else if (period !== "max") from = shiftMonths(lastD, period);
+  let i = Math.max(0, idxAtOrBefore(s, from));
+  const [D, V] = downsample(s.dates.slice(i), s.close.slice(i));
+  const ch = (V[V.length - 1] / V[0] - 1) * 100, color = ch >= 0 ? css("--up") : css("--down");
+  draw("mainChart", {
+    type: "line",
+    data: { labels: D.map(frDate), datasets: [{ label: `${s.short} (${pct(ch)} sur la période)`, data: V,
+      borderColor: color, backgroundColor: color + "22", fill: true }] },
+    options: baseOptions()
+  });
+}
+function setupControls() {
+  const sel = document.getElementById("tickerSel");
+  sel.innerHTML = Object.entries(DATA.series).map(([t, s]) => `<option value="${t}">${s.name}</option>`).join("");
+  sel.value = ticker;
+  sel.onchange = () => { ticker = sel.value; renderMain(); };
+  const box = document.getElementById("periods");
+  box.innerHTML = PERIODS.map(([l, v]) => `<button data-p="${v}" class="${String(v) === String(period) ? "on" : ""}">${l}</button>`).join("");
+  box.onclick = e => {
+    const b = e.target.closest("button"); if (!b) return;
+    period = isNaN(+b.dataset.p) ? b.dataset.p : +b.dataset.p;
+    [...box.children].forEach(x => x.classList.toggle("on", x === b)); renderMain();
+  };
+}
+
+/* ---------- Comparaison base 100 ---------- */
+function renderCompare() {
+  const ref = series(PRIMARY), others = ["DCAM.PA", "WPEA.PA", "CW8.PA"].map(series).filter(Boolean);
+  if (!ref || others.length < 2) return;
+  const start = ref.dates[0];
+  const [D] = downsample(ref.dates, ref.close);
+  const palette = [css("--accent"), "#e08a1e", "#8a5cd1"];
+  draw("cmpChart", {
+    type: "line",
+    data: { labels: D.map(frDate), datasets: others.map((s, k) => {
+      const b = s.close[Math.max(0, idxAtOrBefore(s, start))];
+      return { label: s.short, borderColor: palette[k], data: D.map(d => { const i = idxAtOrBefore(s, d); return i < 0 ? null : +(s.close[i] / b * 100).toFixed(2); }) };
+    }) },
+    options: baseOptions()
+  });
+}
+
+/* ---------- Performances annuelles ---------- */
+function renderYears() {
+  const s = series(LONG); if (!s) return;
+  const lastOfYear = {};
+  s.dates.forEach((d, i) => { lastOfYear[d.slice(0, 4)] = i; });
+  const years = Object.keys(lastOfYear).sort(), rows = [];
+  const currentYear = s.dates[s.dates.length - 1].slice(0, 4);
+  for (let k = 1; k < years.length; k++) {
+    const y = years[k], r = (s.close[lastOfYear[y]] / s.close[lastOfYear[years[k - 1]]] - 1) * 100;
+    rows.push({ y: y === currentYear ? y + " (en cours)" : y, r });
+  }
+  const up = css("--up"), down = css("--down");
+  draw("yearChart", {
+    type: "bar",
+    data: { labels: rows.map(r => r.y.slice(0, 4)), datasets: [{ label: "Performance annuelle (%)", data: rows.map(r => +r.r.toFixed(1)),
+      backgroundColor: rows.map(r => r.r >= 0 ? up : down) }] },
+    options: baseOptions({ plugins: { legend: { display: false } } })
+  });
+  const pos = rows.filter(r => r.r > 0).length;
+  document.getElementById("yearTable").innerHTML =
+    `<tr><th>Année</th><th class="n">Performance</th></tr>` +
+    rows.slice().reverse().map(r => `<tr><td>${r.y}</td><td class="n ${cls(r.r)}">${pct(r.r)}</td></tr>`).join("") +
+    `<tr><td colspan="2" style="color:var(--muted)">${pos} années en hausse sur ${rows.length}</td></tr>`;
+}
+
+/* ---------- Baisses (drawdowns) ---------- */
+function renderDrawdowns() {
+  const s = series(LONG); if (!s) return;
+  const dd = [], eps = [];
+  let peak = s.close[0], peakI = 0, cur = null;
+  s.close.forEach((c, i) => {
+    if (c >= peak) {
+      if (cur) { cur.recI = i; eps.push(cur); cur = null; }
+      peak = c; peakI = i;
+    } else {
+      const depth = (c / peak - 1) * 100;
+      if (!cur) cur = { peakI, troughI: i, depth };
+      if (depth < cur.depth) { cur.depth = depth; cur.troughI = i; }
+    }
+    dd.push(+((c / peak - 1) * 100).toFixed(2));
+  });
+  if (cur) eps.push(cur);
+  const [D, V] = downsample(s.dates, dd);
+  draw("ddChart", {
+    type: "line",
+    data: { labels: D.map(frDate), datasets: [{ label: "Écart au plus haut (%)", data: V, borderColor: css("--down"), backgroundColor: css("--down") + "33", fill: true }] },
+    options: baseOptions({ plugins: { legend: { display: false } } })
+  });
+  const big = eps.filter(e => e.depth <= -10).reverse();
+  const days = (a, b) => Math.round((new Date(s.dates[b]) - new Date(s.dates[a])) / 864e5);
+  const months = d => d < 60 ? d + " jours" : Math.round(d / 30.4) + " mois";
+  document.getElementById("ddTable").innerHTML =
+    `<tr><th>Début de la baisse</th><th class="n">Baisse max</th><th>Point bas</th><th>Retour au plus haut</th></tr>` +
+    big.map(e => `<tr><td>${frDate(s.dates[e.peakI])}</td><td class="n down">${pct(e.depth)}</td><td>${frDate(s.dates[e.troughI])}</td>` +
+      `<td>${e.recI ? frDate(s.dates[e.recI]) + " (" + months(days(e.peakI, e.recI)) + ")" : "pas encore"}</td></tr>`).join("");
+}
+
+/* ---------- Simulateur DCA ---------- */
+function renderDca() {
+  const s = series(LONG); if (!s) return;
+  const amount = parseFloat(document.getElementById("dcaAmount").value);
+  let start = document.getElementById("dcaStart").value || "2015-01";
+  store("dcaAmount", document.getElementById("dcaAmount").value); store("dcaStart", start);
+  if (start < s.dates[0].slice(0, 7)) start = s.dates[0].slice(0, 7);
+  if (!(amount > 0)) return;
+  let units = 0, invested = 0, month = "";
+  const L = [], INV = [], VAL = [];
+  s.dates.forEach((d, i) => {
+    const m = d.slice(0, 7);
+    if (m < start) return;
+    if (m !== month) { month = m; units += amount / s.close[i]; invested += amount; L.push(m); INV.push(+invested.toFixed(2)); VAL.push(+(units * s.close[i]).toFixed(2)); }
+  });
+  if (!L.length) { document.getElementById("dcaKpis").innerHTML = ""; return; }
+  const last = s.close[s.close.length - 1], value = units * last, gain = value - invested;
+  VAL[VAL.length - 1] = +value.toFixed(2);
+  document.getElementById("dcaKpis").innerHTML = kpi("Total investi", eur(invested, 0)) + kpi("Valeur aujourd'hui", eur(value, 0)) +
+    kpi("Gain / perte", (gain > 0 ? "+" : "") + eur(gain, 0), cls(gain)) + kpi("En %", pct((value / invested - 1) * 100), cls(gain));
+  const fmtM = m => new Date(m + "-15").toLocaleDateString("fr-FR", { month: "short", year: "numeric" });
+  draw("dcaChart", {
+    type: "line",
+    data: { labels: L.map(fmtM), datasets: [
+      { label: "Valeur du portefeuille", data: VAL, borderColor: css("--accent"), backgroundColor: css("--accent") + "22", fill: true },
+      { label: "Argent versé", data: INV, borderColor: css("--muted"), borderDash: [5, 4] } ] },
+    options: baseOptions()
+  });
+}
+
+function init(data) {
+  DATA = data;
+  const up = new Date(data.updated);
+  document.getElementById("updated").textContent = "Données mises à jour le " +
+    up.toLocaleString("fr-FR", { dateStyle: "long", timeStyle: "short" });
+  document.getElementById("sourceLine").textContent = "Source des cours : " + (data.source || "Yahoo Finance") + " (données non officielles).";
+  ["buyPrice", "qty", "dcaAmount", "dcaStart"].forEach(id => { const v = load(id); if (v) document.getElementById(id).value = v; });
+  ["buyPrice", "qty"].forEach(id => document.getElementById(id).addEventListener("input", renderMine));
+  ["dcaAmount", "dcaStart"].forEach(id => document.getElementById(id).addEventListener("input", renderDca));
+  if (!series(ticker)) ticker = Object.keys(DATA.series)[0];
+  setupControls();
+  [renderKpis, renderMine, renderMain, renderCompare, renderYears, renderDrawdowns, renderDca].forEach(f => {
+    try { f(); } catch (e) { console.error(f.name, e); }
+  });
+}
+function fail(msg) {
+  const el = document.getElementById("error");
+  el.style.display = "block";
+  el.innerHTML = "<b>Impossible de charger les données.</b><br>" + msg +
+    "<br><br>Sur GitHub : lance une fois l'action « Mise à jour des données » (onglet Actions) pour créer <code>data.json</code>." +
+    "<br>En local : ouvre le site avec un petit serveur (<code>python -m http.server</code>), pas en double-cliquant sur le fichier.";
+  document.getElementById("updated").textContent = "";
+}
+if (typeof Chart === "undefined") fail("La librairie de graphiques (Chart.js) n'a pas pu être chargée.");
+else fetch("data.json", { cache: "no-store" })
+  .then(r => { if (!r.ok) throw new Error("data.json introuvable (" + r.status + ")"); return r.json(); })
+  .then(init).catch(e => fail(e.message));
+</script>
+</body>
+</html>
